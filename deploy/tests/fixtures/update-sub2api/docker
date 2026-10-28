@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+compose_image() {
+    awk '
+        /^  sub2api:[[:space:]]*$/ { in_service = 1; next }
+        in_service && /^    image:[[:space:]]*/ { print $2; exit }
+    ' "$1"
+}
+
+case $1 in
+    compose)
+        shift
+        [[ $1 == -f ]]
+        compose_file=$2
+        shift 2
+        case $1 in
+            config)
+                image=$(compose_image "$compose_file")
+                [[ -n $image ]]
+                if [[ ${2:-} == --format ]]; then
+                    printf '{"services":{"sub2api":{"image":"%s"}}}\n' "$image"
+                fi
+                ;;
+            ps)
+                printf 'mock-sub2api\n'
+                ;;
+            up)
+                image=$(compose_image "$compose_file")
+                if [[ $MOCK_MODE == start-fail && $image == "$MOCK_NEW_IMAGE" ]]; then
+                    exit 1
+                fi
+                printf '%s\n' "$image" > "$MOCK_STATE_DIR/active_image"
+                ;;
+            *) exit 2 ;;
+        esac
+        ;;
+    image)
+        [[ $2 == inspect ]]
+        ;;
+    inspect)
+        case $3 in
+            '{{.State.Running}}') printf 'true\n' ;;
+            '{{.Config.Image}}') cat "$MOCK_STATE_DIR/active_image" ;;
+            *) exit 2 ;;
+        esac
+        ;;
+    exec)
+        active_image=$(cat "$MOCK_STATE_DIR/active_image")
+        if [[ $MOCK_MODE == unhealthy && $active_image == "$MOCK_NEW_IMAGE" ]]; then
+            exit 1
+        fi
+        ;;
+    pull) ;;
+    *) exit 2 ;;
+esac
